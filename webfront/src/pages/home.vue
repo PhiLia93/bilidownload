@@ -58,12 +58,12 @@ async function handleSearch() {
         loading.value = false
     }
     // 监看下后端信息和视频信息
-    console.log('message:', message.value)
-    console.log('videoInfo:', videoInfo.value)
+    console.log('home/message:', message.value)
+    console.log('home/videoInfo:', videoInfo.value)
 
     // 解析成功后，路由到message并传递视频信息
     if (videoInfo.value) {
-        videoStore.setVideoInfo(videoInfo.value)
+        videoStore.setVideoInfo(videoInfo.value) // 把解析到的视频信息存到store中
         router.push({ path: '/message' })
     }
 };
@@ -100,7 +100,7 @@ async function handleSearch() {
     align-items: center;
     justify-content: center;
     padding: 40px 20px;
-    height: 40vh;
+    height: 25vh;
 }
 
 .title {
@@ -129,8 +129,8 @@ async function handleSearch() {
     top: -2px;
     left: -2px;
     right: -2px;
-    bottom: -2px; background: linear-gradi
-    ent(90deg, #3370FF 0%, #9D4EDD 100%);
+    bottom: -2px; 
+    background: linear-gradient(90deg, #3370FF 0%, #9D4EDD 100%);
     z-index: -1;
     border-radius: 27px;
 }
