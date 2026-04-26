@@ -18,12 +18,11 @@ const headers = {
     'Accept': '*/*'                                      // 接受任意类型的响应
 }
 
-// 处理前端发BV号
+// 处理前端发的BV号
 router.get('/api/bv/info', async (ctx) => {
     // 从URL(api/bv/info?input=xxx)查询参数(input)中获取BV号
     console.log('ctx.query: ', ctx.query)
     const { input } = ctx.query
-    console.log('BV: ', input)
     
     // 没成功取到BV号就报400
     if (!input) { 
@@ -39,23 +38,30 @@ router.get('/api/bv/info', async (ctx) => {
             { headers }      // 使用模拟的浏览器请求头，就是最上面写的那个
         )
 
+        const bvid = res_formBili.data.data.bvid      // BV号
+        const cid = res_formBili.data.data.cid        // cid，用于后续获取播放地址
+
+        // 获取视频清晰度列表
+        const playUrlRes = await axios.get(
+            `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=6&fnver=0&fnval=0`,
+            { headers }
+        )
+
         // 返回给前端的视频信息
         // ctx.body可以被多次声明，取最后一次生效，当路由函数执行完毕后，koa自动发送ctx.body给前端（JSON格式）
         ctx.body = {
-            bvid:     res_formBili.data.data.bvid,        // BV号
             title:    res_formBili.data.data.title,       // 标题
             pic:      res_formBili.data.data.pic,         // 封面的URL
             duration: res_formBili.data.data.duration,    // 视频时长（秒）
-            cid:      res_formBili.data.data.cid,         // cid，用于后续获取播放地址
             author:   res_formBili.data.data.owner.name,  // 作者
-            uid:      res_formBili.data.data.owner.mid    // 作者uid
+            description: playUrlRes.data.data.accept_description,    // 视频清晰度
         }
-        console.log('ctx.body: ', ctx.body)
+        console.log('ctx.body: ', ctx.body) 
     } 
     catch (error) {
         console.error('获取视频信息失败:', error.message) 
         ctx.status = 500   // HTTP状态码500：服务器错误
-        ctx.body = { error: '获取视频信息失败' } 
+        ctx.body = { error: '获取视频信息失败：' + error.message } 
     }
 })
 
