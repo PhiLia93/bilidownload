@@ -1,4 +1,5 @@
 <script setup lang="ts">
+    import { ref } from 'vue'
     import { useVideoStore } from '@/stores/videoinfo'
     import { useRouter } from 'vue-router';
 
@@ -7,10 +8,12 @@
     // 从pinia那边拉取解析的视频信息
     const videoStore = useVideoStore()
     console.log('message/videoInfo:', videoStore.videoInfo)
-    // 设置视频清晰度列表，供选择
-    const videoDescription = videoStore.videoInfo.description
     
+    const videoDescription = videoStore.videoInfo.description   // 清晰度命名
+    const videoQuality = videoStore.videoInfo.quality           // 清晰度对应的qn值
+    const selectedQuality = ref(videoQuality[0])                // 选中的清晰度，默认第一个
 
+    // 原时常数据是秒，这里转化成拟人一点的显示方式
     // 原时常数据是秒，这里转化成拟人一点的显示方式
     function formatDuration(seconds: number): string {
         if (seconds < 60) {
@@ -33,8 +36,19 @@
     async function gobackHome() {
         router.push({ path: '/' })
     }
+
+    // 下载视频
     async function downloadThisVideo() {
+        const { bvid, cid, title } = videoStore.videoInfo
+        const qn = selectedQuality.value
+        const url = `http://localhost:3000/api/bv/download?bvid=${bvid}&cid=${cid}&qn=${qn}&title=${encodeURIComponent(title)}`
         
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${title}.mp4`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
     }
 </script>
 
@@ -51,8 +65,10 @@
             <div class="goback-or-download">
                 <el-button type="primary" @click="gobackHome"> 重新搜索 </el-button>
                 <el-button type="primary" @click="downloadThisVideo"> 下载视频 </el-button>
-                <select class="sharpness-select">
-                    <option v-for="item in videoDescription" :key="item" >{{ item }}</option>
+                <select class="sharpness-select" v-model="selectedQuality">
+                    <option v-for="(desc, index) in videoDescription" :key="desc" :value="videoQuality[index]">
+                        {{ desc }}
+                    </option>
                 </select>
             </div>
         </div>

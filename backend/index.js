@@ -50,11 +50,14 @@ router.get('/api/bv/info', async (ctx) => {
         // 返回给前端的视频信息
         // ctx.body可以被多次声明，取最后一次生效，当路由函数执行完毕后，koa自动发送ctx.body给前端（JSON格式）
         ctx.body = {
-            title:    res_formBili.data.data.title,       // 标题
-            pic:      res_formBili.data.data.pic,         // 封面的URL
-            duration: res_formBili.data.data.duration,    // 视频时长（秒）
-            author:   res_formBili.data.data.owner.name,  // 作者
-            description: playUrlRes.data.data.accept_description,    // 视频清晰度
+            bvid:     res_formBili.data.data.bvid,
+            cid:      res_formBili.data.data.cid,
+            title:    res_formBili.data.data.title,
+            pic:      res_formBili.data.data.pic,
+            duration: res_formBili.data.data.duration,
+            author:   res_formBili.data.data.owner.name,
+            quality:     playUrlRes.data.data.accept_quality,
+            description: playUrlRes.data.data.accept_description,
         }
         console.log('ctx.body: ', ctx.body) 
     } 
@@ -64,6 +67,53 @@ router.get('/api/bv/info', async (ctx) => {
         ctx.body = { error: '获取视频信息失败：' + error.message } 
     }
 })
+
+router.get('/api/bv/download', async (ctx) => {
+    const { bvid, cid, qn, title } = ctx.query
+    
+    if (!bvid || !cid || !qn) {
+        ctx.status = 400
+        ctx.body = { error: '缺少必要参数(bvid, cid, qn)' }
+        return
+    }
+
+    try {
+        const playUrlRes = await axios.get(
+            `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=${qn}&fnver=0&fnval=0&fourk=1`,
+            { headers }
+        )
+
+        if (!playUrlRes.data.data.durl || playUrlRes.data.data.durl.length === 0) {
+            ctx.status = 500
+            ctx.body = { error: '无法获取视频下载地址，可能需要登录' }
+            return
+        }
+
+        const videoUrl = playUrlRes.data.data.durl[0].url
+        const videoSize = playUrlRes.data.data.durl[0].size
+
+        ctx.set('Content-Type', 'video/mp4')
+        ctx.set('Content-Length', videoSize)
+        ctx.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(title || 'video')}.mp4`)
+
+        const videoRes = await axios.get(videoUrl, {
+            headers: {
+                'User-Agent': headers['User-Agent'],
+                'Referer': 'https://www.bilibili.com'
+            },
+            responseType: 'stream'
+        })
+        
+        ctx.body = videoRes.data
+    } catch (error) {
+        console.error('下载视频失败:', error.message)
+        ctx.status = 500
+        ctx.body = { error: '下载视频失败：' + error.message }
+    }
+})
+
+
+
 
 app.use(router.routes())
 app.use(router.allowedMethods())      // 自动处理允许的HTTP方法
