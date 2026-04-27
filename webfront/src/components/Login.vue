@@ -1,9 +1,15 @@
 <script setup lang="ts">
-  
+    import { useRouter } from 'vue-router';
+    const router = useRouter();
+    
+    function LoginBili() {
+        router.push('/login')
+    }
+    
 </script>
 
 <template>
-    <el-button type="primary" link class="login-btn"> 登录 </el-button>
+    <el-button type="primary" link class="login-btn" @click="LoginBili"> 登录 </el-button>
 </template>
 
 <style scoped>

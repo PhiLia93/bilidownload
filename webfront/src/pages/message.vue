@@ -43,6 +43,9 @@
         const qn = selectedQuality.value
         const url = `http://localhost:3000/api/bv/download?bvid=${bvid}&cid=${cid}&qn=${qn}&title=${encodeURIComponent(title)}`
         
+        // 创建一个a标签，设置其href属性为下载URL，download属性为视频标题
+        // 将a标签添加到文档中，触发点击事件，下载视频
+        // 下载完成后，从文档中移除a标签，避免内存泄漏
         const a = document.createElement('a')
         a.href = url
         a.download = `${title}.mp4`

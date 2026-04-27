@@ -50,14 +50,15 @@ router.get('/api/bv/info', async (ctx) => {
         // 返回给前端的视频信息
         // ctx.body可以被多次声明，取最后一次生效，当路由函数执行完毕后，koa自动发送ctx.body给前端（JSON格式）
         ctx.body = {
-            bvid:     res_formBili.data.data.bvid,
-            cid:      res_formBili.data.data.cid,
-            title:    res_formBili.data.data.title,
-            pic:      res_formBili.data.data.pic,
-            duration: res_formBili.data.data.duration,
-            author:   res_formBili.data.data.owner.name,
-            quality:     playUrlRes.data.data.accept_quality,
-            description: playUrlRes.data.data.accept_description,
+            bvid:     res_formBili.data.data.bvid,                  // BV号
+            cid:      res_formBili.data.data.cid,                   // cid，用于后续获取播放地址
+            title:    res_formBili.data.data.title,                 // 视频标题
+            pic:      res_formBili.data.data.pic,                   // 视频封面
+            duration: res_formBili.data.data.duration,              // 视频时长（秒）
+            author:   res_formBili.data.data.owner.name,            // 视频作者
+            quality:     playUrlRes.data.data.accept_quality,       // 视频清晰度参数（qn）
+            description: playUrlRes.data.data.accept_description,   // 视频清晰度描述（1080P、720P...）
+            // qn是清晰度标识值，例如qn=16表示360P，64表示720P...
         }
         console.log('ctx.body: ', ctx.body) 
     } 
@@ -68,9 +69,11 @@ router.get('/api/bv/info', async (ctx) => {
     }
 })
 
+// 处理前端的下载请求
 router.get('/api/bv/download', async (ctx) => {
     const { bvid, cid, qn, title } = ctx.query
     
+    // 讲道理一般来说是不会缺的，但万一呢
     if (!bvid || !cid || !qn) {
         ctx.status = 400
         ctx.body = { error: '缺少必要参数(bvid, cid, qn)' }
