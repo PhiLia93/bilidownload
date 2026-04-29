@@ -2,9 +2,11 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useVideoStore } from '@/stores/videoinfo'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter();
 const videoStore = useVideoStore()
+const userStore = useUserStore()
 
 const searchQuery = ref('')     // 输入的BV号或视频链接
 const loading = ref(false)      // 解析状态，true为正在解析
@@ -35,9 +37,22 @@ async function handleSearch() {
     console.log('BV号:', BV[1]) // BV的第一项是BV号
 
     try {
-        // 发送GET请求到后端API，encodeURIComponent用于对URL参数进行编码，防止特殊字符导致URL格式错误
-        const res = await fetch(`http://localhost:3000/api/bv/info?input=${encodeURIComponent(BV[1])}`)
-        // 将响应体解析为JSON对象
+        console.log('用户登录状态:', userStore.isLoggedIn)
+        console.log('sessdata:', userStore.sessdata)
+        
+        const params = new URLSearchParams({
+            input: BV[1]
+        })
+        
+        if (userStore.isLoggedIn) {
+            params.append('sessdata', userStore.sessdata)
+            params.append('bili_jct', userStore.biliJct)
+            params.append('dede_user_id', userStore.dedeUserId)
+        }
+        
+        console.log('请求参数:', params.toString())
+        
+        const res = await fetch(`http://localhost:3000/api/bv/info?${params}`)
         const data = await res.json()
         
         if (data.error) {

@@ -72,7 +72,7 @@
             const data = await res.json()
             
             if (data.username) {
-                userStore.setUserInfo(data.username, sessdata)
+                userStore.setUserInfo(data.username, sessdata, biliJct, dedeUserId)
                 statusText.value = '登录成功！'
                 setTimeout(() => {
                     router.push('/')

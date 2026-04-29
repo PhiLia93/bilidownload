@@ -3,100 +3,214 @@ import Router from 'koa-router'
 import cors from '@koa/cors'
 import bodyParser from 'koa-bodyparser'
 import axios from 'axios'
+import crypto from 'crypto'
+import loginRouter from './login.js'
 
 const app = new Koa()
 const router = new Router()
 
 app.use(cors())
-app.use(bodyParser()) // 自动将请求体中的JSON转换为JS对象
+app.use(bodyParser())
 
-// 通用请求头，用于模拟浏览器请求B站API
-// B站会检查请求头，如果不是浏览器请求可能会返回错误
 const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',  // 模拟Chrome浏览器
-    'Referer': 'https://www.bilibili.com',               // 设置来源页面为B站，B站防盗链会检查这个
-    'Accept': '*/*'                                      // 接受任意类型的响应
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Referer': 'https://www.bilibili.com',
+    'Accept': '*/*'
 }
 
-// 处理前端发的BV号
+const mixinKeyEncTab = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
+    61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
+    36, 20, 34, 44, 52
+]
+
+function getMixinKey(orig) {
+    return mixinKeyEncTab.map(k => orig[k]).join('').slice(0, 32)
+}
+
+function encWbi(params, imgKey, subKey) {
+    const mixinKey = getMixinKey(imgKey + subKey)
+    const currTime = Math.round(Date.now() / 1000)
+    const newParams = { ...params, wts: currTime }
+    const keys = Object.keys(newParams).sort()
+    const query = keys.map(k => {
+        const value = String(newParams[k]).replace(/[!'()*]/g, '')
+        return `${encodeURIComponent(k)}=${encodeURIComponent(value)}`
+    }).join('&')
+    const wRid = crypto.createHash('md5').update(query + mixinKey).digest('hex')
+    return { ...newParams, w_rid: wRid }
+}
+
+let wbiKeys = { imgKey: '', subKey: '', updateTime: 0, hasCookie: false }
+
+async function getWbiKeys(cookie = '') {
+    const now = Date.now()
+    const hasCookie = !!cookie
+    if (wbiKeys.imgKey && now - wbiKeys.updateTime < 10 * 60 * 1000 && wbiKeys.hasCookie === hasCookie) {
+        return wbiKeys
+    }
+    try {
+        const reqHeaders = { ...headers }
+        if (cookie) {
+            reqHeaders['Cookie'] = cookie
+        }
+        const res = await axios.get('https://api.bilibili.com/x/web-interface/nav', { headers: reqHeaders })
+        const { img_url, sub_url } = res.data.data.wbi_img
+        wbiKeys.imgKey = img_url.split('/').pop().split('.')[0]
+        wbiKeys.subKey = sub_url.split('/').pop().split('.')[0]
+        wbiKeys.updateTime = now
+        wbiKeys.hasCookie = hasCookie
+        console.log('更新Wbi密钥:', wbiKeys)
+        return wbiKeys
+    } catch (e) {
+        console.error('获取Wbi密钥失败:', e.message)
+        return wbiKeys
+    }
+}
+
 router.get('/api/bv/info', async (ctx) => {
-    // 从URL(api/bv/info?input=xxx)查询参数(input)中获取BV号
     console.log('ctx.query: ', ctx.query)
-    const { input } = ctx.query
+    const { input, sessdata, bili_jct, dede_user_id } = ctx.query
     
-    // 没成功取到BV号就报400
     if (!input) { 
         ctx.status = 400 
         ctx.body = { error: '请输入有效的BV号或链接' }
         return 
     }
 
+    const requestHeaders = { ...headers }
+    if (sessdata) {
+        console.log('收到sessdata，设置Cookie')
+        requestHeaders['Cookie'] = `SESSDATA=${sessdata}; bili_jct=${bili_jct || ''}; DedeUserID=${dede_user_id || ''}`
+        console.log('Cookie:', requestHeaders['Cookie'])
+    } else {
+        console.log('未收到sessdata，使用游客模式')
+    }
+
     try {
-        // 调用B站官方API获取视频信息
         const res_formBili = await axios.get(
             `https://api.bilibili.com/x/web-interface/view?bvid=${input}`,
-            { headers }      // 使用模拟的浏览器请求头，就是最上面写的那个
+            { headers: requestHeaders }
         )
 
-        const bvid = res_formBili.data.data.bvid      // BV号
-        const cid = res_formBili.data.data.cid        // cid，用于后续获取播放地址
+        const bvid = res_formBili.data.data.bvid
+        const cid = res_formBili.data.data.cid
+        
+        console.log('视频标题:', res_formBili.data.data.title)
+        console.log('视频cid:', cid)
 
-        // 获取视频清晰度列表
+        const { imgKey, subKey } = await getWbiKeys(requestHeaders['Cookie'] || '')
+        const params = encWbi({
+            bvid,
+            cid,
+            qn: 127,
+            fnver: 0,
+            fnval: 4048,
+            fourk: 1
+        }, imgKey, subKey)
+        
+        const queryString = Object.entries(params).map(([k, v]) => `${k}=${v}`).join('&')
+        
         const playUrlRes = await axios.get(
-            `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=6&fnver=0&fnval=0`,
-            { headers }
+            `https://api.bilibili.com/x/player/wbi/playurl?${queryString}`,
+            { headers: requestHeaders }
         )
+        
+        console.log('accept_quality:', playUrlRes.data.data.accept_quality)
+        console.log('accept_description:', playUrlRes.data.data.accept_description)
 
-        // 返回给前端的视频信息
-        // ctx.body可以被多次声明，取最后一次生效，当路由函数执行完毕后，koa自动发送ctx.body给前端（JSON格式）
         ctx.body = {
-            bvid:     res_formBili.data.data.bvid,                  // BV号
-            cid:      res_formBili.data.data.cid,                   // cid，用于后续获取播放地址
-            title:    res_formBili.data.data.title,                 // 视频标题
-            pic:      res_formBili.data.data.pic,                   // 视频封面
-            duration: res_formBili.data.data.duration,              // 视频时长（秒）
-            author:   res_formBili.data.data.owner.name,            // 视频作者
-            quality:     playUrlRes.data.data.accept_quality,       // 视频清晰度参数（qn）
-            description: playUrlRes.data.data.accept_description,   // 视频清晰度描述（1080P、720P...）
-            // qn是清晰度标识值，例如qn=16表示360P，64表示720P...
+            bvid:     res_formBili.data.data.bvid,
+            cid:      res_formBili.data.data.cid,
+            title:    res_formBili.data.data.title,
+            pic:      res_formBili.data.data.pic,
+            duration: res_formBili.data.data.duration,
+            author:   res_formBili.data.data.owner.name,
+            quality:     playUrlRes.data.data.accept_quality,
+            description: playUrlRes.data.data.accept_description,
         }
         console.log('ctx.body: ', ctx.body) 
     } 
     catch (error) {
         console.error('获取视频信息失败:', error.message) 
-        ctx.status = 500   // HTTP状态码500：服务器错误
+        ctx.status = 500
         ctx.body = { error: '获取视频信息失败：' + error.message } 
     }
 })
 
-// 处理前端的下载请求
 router.get('/api/bv/download', async (ctx) => {
-    const { bvid, cid, qn, title } = ctx.query
+    const { bvid, cid, qn, title, sessdata, bili_jct, dede_user_id } = ctx.query
     
-    // 讲道理一般来说是不会缺的，但万一呢
     if (!bvid || !cid || !qn) {
         ctx.status = 400
         ctx.body = { error: '缺少必要参数(bvid, cid, qn)' }
         return
     }
 
-    try {
-        const playUrlRes = await axios.get(
-            `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=${qn}&fnver=0&fnval=0&fourk=1`,
-            { headers }
-        )
+    const requestHeaders = { ...headers }
+    if (sessdata) {
+        requestHeaders['Cookie'] = `SESSDATA=${sessdata}; bili_jct=${bili_jct || ''}; DedeUserID=${dede_user_id || ''}`
+    }
 
-        if (!playUrlRes.data.data.durl || playUrlRes.data.data.durl.length === 0) {
+    try {
+        console.log('下载请求参数:', { bvid, cid, qn, sessdata: sessdata ? '有' : '无' })
+        
+        const { imgKey, subKey } = await getWbiKeys(requestHeaders['Cookie'] || '')
+        const params = encWbi({
+            bvid,
+            cid,
+            qn,
+            fnver: 0,
+            fnval: 4048,
+            fourk: 1
+        }, imgKey, subKey)
+        
+        const queryString = Object.entries(params).map(([k, v]) => `${k}=${v}`).join('&')
+        
+        const playUrlRes = await axios.get(
+            `https://api.bilibili.com/x/player/wbi/playurl?${queryString}`,
+            { headers: requestHeaders }
+        )
+        
+        console.log('下载响应code:', playUrlRes.data.code)
+        
+        if (playUrlRes.data.code !== 0) {
             ctx.status = 500
-            ctx.body = { error: '无法获取视频下载地址，可能需要登录' }
+            ctx.body = { error: playUrlRes.data.message || '获取视频失败' }
+            return
+        }
+        
+        const data = playUrlRes.data.data
+        let videoUrl = null
+        
+        if (data.durl && data.durl.length > 0) {
+            videoUrl = data.durl[0].url
+            console.log('传统格式下载')
+        } else if (data.dash && data.dash.video && data.dash.video.length > 0) {
+            const qnNum = parseInt(qn)
+            let videoItem = data.dash.video.find(v => v.id === qnNum)
+            
+            if (!videoItem) {
+                for (const q of [120, 112, 80, 74, 64, 32, 16]) {
+                    videoItem = data.dash.video.find(v => v.id === q)
+                    if (videoItem) break
+                }
+            }
+            
+            if (videoItem) {
+                videoUrl = videoItem.baseUrl || videoItem.base_url
+                console.log('DASH格式下载 - 视频ID:', videoItem.id)
+            }
+        }
+        
+        if (!videoUrl) {
+            ctx.status = 500
+            ctx.body = { error: '无法获取视频下载地址' }
             return
         }
 
-        const videoUrl = playUrlRes.data.data.durl[0].url
-        const videoSize = playUrlRes.data.data.durl[0].size
-
         ctx.set('Content-Type', 'video/mp4')
-        ctx.set('Content-Length', videoSize)
         ctx.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(title || 'video')}.mp4`)
 
         const videoRes = await axios.get(videoUrl, {
@@ -115,129 +229,11 @@ router.get('/api/bv/download', async (ctx) => {
     }
 })
 
-router.get('/api/login/qrcode', async (ctx) => {
-    try {
-        const res = await axios.get(
-            'https://passport.bilibili.com/x/passport-login/web/qrcode/generate',
-            { headers }
-        )
-        ctx.body = {
-            url: res.data.data.url,
-            qrcode_key: res.data.data.qrcode_key
-        }
-    } catch (error) {
-        console.error('获取二维码失败:', error.message)
-        ctx.status = 500
-        ctx.body = { error: '获取二维码失败' }
-    }
-})
-
-router.get('/api/login/check', async (ctx) => {
-    const { qrcode_key } = ctx.query
-    
-    if (!qrcode_key) {
-        ctx.status = 400
-        ctx.body = { error: '缺少qrcode_key' }
-        return
-    }
-
-    try {
-        const res = await axios.get(
-            `https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=${qrcode_key}`,
-            { headers }
-        )
-        
-        console.log('登录检查响应:', JSON.stringify(res.data, null, 2))
-        
-        const { code, data } = res.data
-        
-        if (code === 0 && data.code === 0) {
-            let sessdata = ''
-            let biliJct = ''
-            let dedeUserId = ''
-            
-            if (data.url) {
-                const urlObj = new URL(data.url)
-                sessdata = urlObj.searchParams.get('SESSDATA') || ''
-                biliJct = urlObj.searchParams.get('bili_jct') || ''
-                dedeUserId = urlObj.searchParams.get('DedeUserID') || ''
-            }
-            
-            console.log('获取到的SESSDATA:', sessdata)
-            
-            ctx.body = {
-                status: 'success',
-                sessdata: sessdata,
-                bili_jct: biliJct,
-                dede_user_id: dedeUserId,
-                url: data.url
-            }
-        } else if (code === 0 && data.code === 86038) {
-            ctx.body = { status: 'expired' }
-        } else if (code === 0 && data.code === 86090) {
-            ctx.body = { status: 'waiting_scan' }
-        } else if (code === 0 && data.code === 86101) {
-            ctx.body = { status: 'waiting_confirm' }
-        } else {
-            ctx.body = { status: 'waiting', code: data.code }
-        }
-    } catch (error) {
-        console.error('检查登录状态失败:', error.message)
-        ctx.status = 500
-        ctx.body = { error: '检查登录状态失败' }
-    }
-})
-
-router.get('/api/user/info', async (ctx) => {
-    const { sessdata, bili_jct, dede_user_id } = ctx.query
-    
-    if (!sessdata) {
-        ctx.status = 400
-        ctx.body = { error: '缺少sessdata' }
-        return
-    }
-
-    console.log('获取用户信息，SESSDATA:', sessdata)
-
-    const cookieStr = `SESSDATA=${sessdata}; bili_jct=${bili_jct || ''}; DedeUserID=${dede_user_id || ''}`
-
-    try {
-        const res = await axios.get(
-            'https://api.bilibili.com/x/web-interface/nav',
-            {
-                headers: {
-                    ...headers,
-                    'Cookie': cookieStr
-                }
-            }
-        )
-        
-        console.log('用户信息响应:', JSON.stringify(res.data, null, 2))
-        
-        if (res.data.code === 0) {
-            ctx.body = {
-                username: res.data.data.uname,
-                face: res.data.data.face,
-                mid: res.data.data.mid
-            }
-        } else {
-            ctx.status = 401
-            ctx.body = { error: '获取用户信息失败，请重新登录', code: res.data.code, message: res.data.message }
-        }
-    } catch (error) {
-        console.error('获取用户信息失败:', error.message)
-        ctx.status = 500
-        ctx.body = { error: '获取用户信息失败' }
-    }
-})
-
-
-
-
 app.use(router.routes())
-app.use(router.allowedMethods())      // 自动处理允许的HTTP方法
+app.use(router.allowedMethods())
+app.use(loginRouter.routes())
+app.use(loginRouter.allowedMethods())
 
-// 启动服务器，监听3000端口
 app.listen(3000, () => {
     console.log('b站视频流请求服务已启动')
 })
